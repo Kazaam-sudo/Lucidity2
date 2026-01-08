@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lucidity | Lucid Dreaming Tracker</title>
+    
+    <!-- ================= TAILWIND & CONFIG ================= -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        bg: '#050505',
+                        surface: '#0f0f11',
+                        surfaceHighlight: '#18181b',
+                        border: '#27272a',
+                        textMain: '#e4e4e7',
+                        textMuted: '#71717a',
+                        accent: '#8b5cf6',       // Violet 500
+                        accentDim: 'rgba(139, 92, 246, 0.1)',
+                        accentHover: '#7c3aed',
+                    },
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- ================= REACT LIBS ================= -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body {
+            background-color: #050505;
+            color: #a1a1aa;
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #050505; }
+        ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 99px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-start p-4 sm:p-6 pb-20">
+
+    <div id="root" class="w-full max-w-md mx-auto"></div>
+
+    <script type="text/babel">
+        
+        /* ================= BLOCK: CONFIG ================= */
+        const CONFIG = {
+            GAS_URL: 'https://script.google.com/macros/s/AKfycbxRWUhPm5Clc6iIR8tIwoE6L1J57Y6nlBdhIMUxqlKCk13jRlspF_MFCxoSZB3x0J5Edg/exec',
+            STORAGE_KEY: 'lucidity_journal',
+            SETTINGS_KEY: 'lucidity_settings'
+        };
+
+        const TECHNIQUES = ['MILD', 'WILD', 'WBTB', 'SSILD', 'RC', 'DEILD', 'None'];
+
+        /* ================= BLOCK: UTILS ================= */
+        const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
+        
+        const formatDate = (isoString) => {
+            if (!isoString) return '';
+            const date = new Date(isoString);
+            return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        };
+
+        const getStorage = (key, defaultVal) => {
+            try {
+                const stored = localStorage.getItem(key);
+                return stored ? JSON.parse(stored) : defaultVal;
+            } catch (e) {
+                console.error("Storage error", e);
+                return defaultVal;
+            }
+        };
+
+        const setStorage = (key, val) => {
+            localStorage.setItem(key, JSON.stringify(val));
+        };
+
+        /* ================= BLOCK: GOOGLE API ================= */
+        const postToGAS = async (payload) => {
+            try {
+                // Use standard fetch. GAS Web App must be deployed as "Me" and "Anyone" (or specific user)
+                // Sending as text/plain to avoid OPTIONS preflight if simple POST, 
+                // but we need to send JSON.
+                const response = await fetch(CONFIG.GAS_URL, {
+                    method: "POST",
+                    body: JSON.stringify(payload)
+                });
+
+                // Check content type to prevent HTML error pages from breaking app
+                const contentType = response.headers.get("content-type");
+                if (!contentType || !contentType.includes("application/json")) {
+                    const text = await response.text();
+                    console.error("GAS returned HTML/Text:", text);
+                    throw new Error("Received HTML/Text response instead of JSON. Check GAS deployment.");
+                }
+
+                if (!response.ok) {
+                    throw new Error(`HTTP Error: ${response.status}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                console.error("GAS API Error:", error);
+                throw error;
+            }
+        };
+
+        /* ================= BLOCK: ICONS & UI ================= */
+        const Icons = {
+            Book: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
+            Calendar: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+            Help: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+            Settings: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>,
+            Sync: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>,
+            Check: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+            Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+            Moon: () => <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        };
+
+        const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false }) => {
+            const base = "px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2";
+            const variants = {
+                primary: "bg-accent text-white hover:bg-accentHover disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_-5px_rgba(139,92,246,0.4)]",
+                ghost: "bg-transparent text-textMuted hover:text-textMain hover:bg-surfaceHighlight",
+                outline: "border border-border text-textMain hover:border-accent hover:text-accent"
+            };
+            return (
+                <button 
+                    onClick={onClick} 
+                    className={`${base} ${variants[variant]} ${className}`}
+                    disabled={disabled}
+                >
+                    {children}
+                </button>
+            );
+        };
+
+        const Input = ({ label, ...props }) => (
+            <div className="flex flex-col gap-1.5 mb-4">
+                <label className="text-xs font-semibold text-textMuted uppercase tracking-wider pl-1">{label}</label>
+                <input 
+                    {...props}
+                    className="w-full bg-surface border border-border rounded-lg px-3 py-2.5 text-textMain focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors text-sm"
+                />
+            </div>
+        );
+
+        const Select = ({ label, options, ...props }) => (
+            <div className="flex flex-col gap-1.5 mb-4">
+                <label className="text-xs font-semibold text-textMuted uppercase tracking-wider pl-1">{label}</label>
+                <div className="relative">
+                    <select 
+                        {...props}
+                        className="w-full appearance-none bg-surface border border-border rounded-lg px-3 py-2.5 text-textMain focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors text-sm"
+                    >
+                        {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-textMuted">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </div>
+                </div>
+            </div>
+        );
+
+        const Textarea = ({ label, ...props }) => (
+            <div className="flex flex-col gap-1.5 mb-4">
+                <label className="text-xs font-semibold text-textMuted uppercase tracking-wider pl-1">{label}</label>
+                <textarea 
+                    {...props}
+                    className="w-full bg-surface border border-border rounded-lg px-3 py-2.5 text-textMain focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors text-sm min-h-[100px] resize-y"
+                />
+            </div>
+        );
+
+        /* ================= BLOCK: JOURNAL ================= */
+        const Journal = ({ entries, onSave }) => {
+            const [form, setForm] = React.useState({
+                bedtime: '23:00',
+                waketime: '07:00',
+                technique: 'MILD',
+                notes: ''
+            });
+
+            const handleChange = (e) => {
+                const { name, value } = e.target;
+                setForm(prev => ({ ...prev, [name]: value }));
+            };
+
+            const handleSubmit = () => {
+                if (!form.notes.trim()) return; // Prevent empty entries
+                
+                const newEntry = {
+                    id: generateId(),
+                    date: new Date().toISOString(),
+                    ...form,
+                    synced: false
+                };
+                onSave(newEntry);
+                setForm(prev => ({ ...prev, notes: '' })); // Only clear notes
+            };
+
+            const recentEntries = entries.slice(0, 5);
+
+            return (
+                <div className="fade-in pb-24">
+                    <div className="mb-6">
+                        <h2 className="text-2xl font-light text-white mb-1">Journal</h2>
+                        <p className="text-sm text-textMuted">Record your journey tonight.</p>
+                    </div>
+
+                    <div className="bg-surfaceHighlight p-4 rounded-xl border border-border mb-8 shadow-sm">
+                        <div className="grid grid-cols-2 gap-4">
+                            <Input 
+                                type="time" 
+                                name="bedtime" 
+                                label="Bedtime" 
+                                value={form.bedtime} 
+                                onChange={handleChange} 
+                            />
+                            <Input 
+                                type="time" 
+                                name="waketime" 
+                                label="Waketime" 
+                                value={form.waketime} 
+                                onChange={handleChange} 
+                            />
+                        </div>
+                        <Select 
+                            name="technique" 
+                            label="Technique" 
+                            options={TECHNIQUES} 
+                            value={form.technique} 
+                            onChange={handleChange} 
+                        />
+                        <Textarea 
+                            name="notes" 
+                            label="Dream Notes" 
+                            placeholder="I was flying over a violet city..." 
+                            value={form.notes} 
+                            onChange={handleChange} 
+                        />
+                        <Button onClick={handleSubmit} className="w-full">
+                            <Icons.Plus /> Save Entry
+                        </Button>
+                    </div>
+
+                    <div className="space-y-4">
+                        <h3 className="text-xs font-semibold text-textMuted uppercase tracking-wider mb-2">Recent Entries</h3>
+                        {recentEntries.length === 0 ? (
+                            <div className="text-center py-8 text-textMuted text-sm border border-dashed border-border rounded-xl">
+                                No dreams recorded yet.
+                            </div>
+                        ) : (
+                            recentEntries.map(entry => (
+                                <div key={entry.id} className="bg-surface p-4 rounded-xl border border-border relative overflow-hidden group hover:border-textMuted transition-colors">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs font-mono text-accent bg-accentDim px-1.5 py-0.5 rounded">{entry.technique}</span>
+                                            <span className="text-xs text-textMuted">{formatDate(entry.date)}</span>
+                                        </div>
+                                        <div className={`w-2 h-2 rounded-full ${entry.synced ? 'bg-green-500/50' : 'bg-yellow-500/50'}`} title={entry.synced ? "Synced" : "Local only"}></div>
+                                    </div>
+                                    <p className="text-sm text-textMain line-clamp-3 leading-relaxed">{entry.notes}</p>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        /* ================= BLOCK: TRACKER ================= */
+        const Tracker = () => {
+            const [calendarData, setCalendarData] = React.useState({});
+            const [loading, setLoading] = React.useState(false);
+            const [selectedDate, setSelectedDate] = React.useState(null);
+
+            const fetchCalendar = React.useCallback(async () => {
+                setLoading(true);
+                try {
+                    const result = await postToGAS({ action: 'readCalendar' });
+                    // Expecting result to be array of objects or an object wrapping data
+                    // GAS Sheet Columns: date | type | title | description | intensity
+                    const rows = Array.isArray(result) ? result : (result.data || []);
+                    
+                    const map = {};
+                    rows.forEach(row => {
+                        // Normalize date to YYYY-MM-DD
+                        let dStr = row.date;
+                        if (dStr && dStr.includes('T')) dStr = dStr.split('T')[0];
+                        
+                        if (dStr) {
+                            map[dStr] = {
+                                goal: row.title || row.type, // Mapping Title -> UI Goal
+                                technique: row.type,         // Mapping Type -> UI Technique
+                                note: row.description,       // Mapping Description -> UI Note
+                                intensity: row.intensity
+                            };
+                        }
+                    });
+                    setCalendarData(map);
+                } catch (e) {
+                    console.error("Tracker fetch error:", e);
+                } finally {
+                    setLoading(false);
+                }
+            }, []);
+
+            React.useEffect(() => {
+                fetchCalendar();
+                const interval = setInterval(fetchCalendar, 300000); // 5 minutes
+                return () => clearInterval(interval);
+            }, [fetchCalendar]);
+
+            const renderCalendar = () => {
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = now.getMonth();
+                
+                const firstDay = new Date(year, month, 1);
+                const lastDay = new Date(year, month + 1, 0);
+                const daysInMonth = lastDay.getDate();
+                const startDayOfWeek = firstDay.getDay(); // 0 = Sun
+                
+                const days = [];
+                
+                // Empty slots
+                for (let i = 0; i < startDayOfWeek; i++) {
+                    days.push(<div key={`empty-${i}`} className="aspect-square"></div>);
+                }
+
+                // Days
+                for (let d = 1; d <= daysInMonth; d++) {
+                    // construct date YYYY-MM-DD safely
+                    // using local components to avoid UTC shift issues in visual calendar
+                    const mm = String(month + 1).padStart(2, '0');
+                    const dd = String(d).padStart(2, '0');
+                    const dateKey = `${year}-${mm}-${dd}`;
+                    
+                    const hasData = calendarData[dateKey];
+                    const isToday = d === now.getDate();
+
+                    days.push(
+                        <div 
+                            key={d}
+                            onClick={() => setSelectedDate(hasData ? { date: dateKey, ...hasData } : null)}
+                            className={`
+                                aspect-square rounded-lg flex items-center justify-center text-sm cursor-pointer relative transition-all
+                                ${isToday ? 'border border-accent text-accent' : 'border border-border text-textMuted'}
+                                ${hasData ? 'bg-surfaceHighlight hover:bg-border' : 'hover:bg-surface'}
+                            `}
+                        >
+                            {d}
+                            {hasData && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-accent"></div>}
+                        </div>
+                    );
+                }
+                return days;
+            };
+
+            return (
+                <div className="fade-in h-full flex flex-col">
+                    <div className="mb-6 flex justify-between items-end">
+                        <div>
+                            <h2 className="text-2xl font-light text-white mb-1">Tracker</h2>
+                            <p className="text-sm text-textMuted">{new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}</p>
+                        </div>
+                        {loading && <div className="text-xs text-accent animate-pulse">Syncing...</div>}
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-2 mb-2 text-center text-xs text-textMuted font-bold uppercase tracking-wider">
+                        <div>Su</div><div>Mo</div><div>Tu</div><div>We</div><div>Th</div><div>Fr</div><div>Sa</div>
+                    </div>
+                    <div className="grid grid-cols-7 gap-2">
+                        {renderCalendar()}
+                    </div>
+
+                    {/* Details Panel */}
+                    <div className="mt-8 flex-1">
+                        <h3 className="text-xs font-semibold text-textMuted uppercase tracking-wider mb-2">
+                            {selectedDate ? selectedDate.date : 'Details'}
+                        </h3>
+                        {selectedDate ? (
+                            <div className="bg-surface p-4 rounded-xl border border-border animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                <div className="flex justify-between mb-2">
+                                    <span className="text-accent text-sm font-medium">{selectedDate.goal}</span>
+                                    <span className="text-xs bg-border px-1.5 py-0.5 rounded text-textMain">{selectedDate.technique}</span>
+                                </div>
+                                <p className="text-sm text-textMuted">{selectedDate.note}</p>
+                            </div>
+                        ) : (
+                            <div className="h-24 rounded-xl border border-dashed border-border flex items-center justify-center text-xs text-textMuted">
+                                Select a highlighted day to view details
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        /* ================= BLOCK: HELP ================= */
+        const Help = () => (
+            <div className="fade-in pb-20">
+                <div className="mb-6">
+                    <h2 className="text-2xl font-light text-white mb-1">Guide</h2>
+                    <p className="text-sm text-textMuted">Essential techniques & concepts.</p>
+                </div>
+
+                <div className="space-y-6">
+                    <section>
+                        <h3 className="text-accent text-sm font-bold uppercase tracking-wider mb-2">The Basics</h3>
+                        <div className="bg-surface p-4 rounded-xl border border-border text-sm text-textMain leading-relaxed space-y-2">
+                            <p><strong className="text-white">Reality Check (RC):</strong> Question your reality. Count your fingers, try to breathe through a pinched nose. Do this frequently awake.</p>
+                            <p><strong className="text-white">Dream Journal:</strong> Critical for dream recall. Write immediately upon waking. No detail is too small.</p>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3 className="text-accent text-sm font-bold uppercase tracking-wider mb-2">Techniques</h3>
+                        <div className="space-y-3">
+                            <div className="bg-surface p-4 rounded-xl border border-border">
+                                <h4 className="text-white font-medium mb-1">MILD</h4>
+                                <p className="text-xs text-textMuted uppercase mb-2">Mnemonic Induction of Lucid Dreams</p>
+                                <p className="text-sm text-textMain leading-relaxed">Before sleep, repeat a mantra: "I will realize I'm dreaming." Visualize yourself becoming lucid in a recent dream.</p>
+                            </div>
+                            <div className="bg-surface p-4 rounded-xl border border-border">
+                                <h4 className="text-white font-medium mb-1">WBTB</h4>
+                                <p className="text-xs text-textMuted uppercase mb-2">Wake Back To Bed</p>
+                                <p className="text-sm text-textMain leading-relaxed">Wake up after 4-6 hours of sleep. Stay awake for 15-30 mins reading about LD. Go back to sleep with intention.</p>
+                            </div>
+                            <div className="bg-surface p-4 rounded-xl border border-border">
+                                <h4 className="text-white font-medium mb-1">WILD</h4>
+                                <p className="text-xs text-textMuted uppercase mb-2">Wake Induced Lucid Dream</p>
+                                <p className="text-sm text-textMain leading-relaxed">Keep your mind awake while your body falls asleep. Watch hypnagogic imagery without engaging until you enter a dream scene.</p>
+                            </div>
+                            <div className="bg-surface p-4 rounded-xl border border-border">
+                                <h4 className="text-white font-medium mb-1">SSILD</h4>
+                                <p className="text-xs text-textMuted uppercase mb-2">Senses Initiated Lucid Dream</p>
+                                <p className="text-sm text-textMain leading-relaxed">Cycles of focusing on Sight, Sound, and Touch for short durations while falling back asleep.</p>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        );
+
+        /* ================= BLOCK: SETTINGS ================= */
+        const Settings = () => {
+            const [rcPrompts, setRcPrompts] = React.useState(getStorage('lucidity_rc', 'Am I dreaming?\nCount your fingers.\nCheck the time twice.'));
+            const [saved, setSaved] = React.useState(false);
+
+            const handleSave = () => {
+                localStorage.setItem('lucidity_rc', rcPrompts);
+                setSaved(true);
+                setTimeout(() => setSaved(false), 2000);
+            };
+
+            return (
+                <div className="fade-in h-full">
+                    <div className="mb-6">
+                        <h2 className="text-2xl font-light text-white mb-1">Settings</h2>
+                        <p className="text-sm text-textMuted">Customize your experience.</p>
+                    </div>
+
+                    <div className="bg-surfaceHighlight p-4 rounded-xl border border-border mb-6">
+                        <h3 className="text-sm font-medium text-white mb-3">Reality Check Prompts</h3>
+                        <p className="text-xs text-textMuted mb-3">One prompt per line.</p>
+                        <textarea 
+                            value={rcPrompts}
+                            onChange={(e) => setRcPrompts(e.target.value)}
+                            className="w-full h-32 bg-bg border border-border rounded-lg p-3 text-sm text-textMain focus:outline-none focus:border-accent resize-none mb-3"
+                        />
+                        <Button onClick={handleSave} className="w-full">
+                            {saved ? <span className="flex items-center gap-2"><Icons.Check /> Saved</span> : 'Save Configuration'}
+                        </Button>
+                    </div>
+                    
+                    <div className="text-center mt-12">
+                         <div className="inline-flex items-center justify-center p-4 rounded-full bg-surface border border-border text-accent mb-4">
+                            <Icons.Moon />
+                         </div>
+                         <p className="text-xs text-textMuted uppercase tracking-widest font-bold">L U C I D I T Y</p>
+                         <p className="text-[10px] text-textMuted mt-1 opacity-50">v1.1.0 · Connected</p>
+                    </div>
+                </div>
+            );
+        };
+
+        /* ================= BLOCK: SYNC ================= */
+        const Sync = ({ entries, onSyncComplete }) => {
+            const [status, setStatus] = React.useState('idle'); // idle, syncing, success, error
+            const unsyncedCount = entries.filter(e => !e.synced).length;
+
+            const handleSync = async () => {
+                if (unsyncedCount === 0) return;
+
+                setStatus('syncing');
+                const unsyncedEntries = entries.filter(e => !e.synced);
+
+                try {
+                    const result = await postToGAS({
+                        action: 'writeJournal',
+                        entries: unsyncedEntries
+                    });
+
+                    // GAS should return { syncedIds: [...] } or we assume success for sent entries
+                    // Robustness: use returned IDs if available, else use sent IDs
+                    const syncedIds = result.syncedIds || unsyncedEntries.map(e => e.id);
+                    
+                    onSyncComplete(syncedIds);
+                    setStatus('success');
+                } catch (e) {
+                    console.error("Sync failed", e);
+                    setStatus('error');
+                }
+            };
+
+            return (
+                <div className="fade-in h-full flex flex-col justify-center items-center pb-20">
+                    <div className="mb-8 text-center">
+                        <h2 className="text-2xl font-light text-white mb-1">Cloud Sync</h2>
+                        <p className="text-sm text-textMuted">Backup your journal to Google Sheets.</p>
+                    </div>
+
+                    <div className="w-full max-w-xs bg-surfaceHighlight p-6 rounded-2xl border border-border flex flex-col items-center shadow-2xl relative overflow-hidden">
+                        
+                        {/* Status Icon */}
+                        <div className={`mb-6 p-4 rounded-full border-2 transition-all duration-500
+                            ${status === 'syncing' ? 'border-accent text-accent animate-spin' : ''}
+                            ${status === 'success' ? 'border-green-500 text-green-500' : ''}
+                            ${status === 'error' ? 'border-red-500 text-red-500' : ''}
+                            ${status === 'idle' ? 'border-border text-textMuted' : ''}
+                        `}>
+                            {status === 'success' ? <Icons.Check /> : <Icons.Sync />}
+                        </div>
+
+                        <div className="text-center w-full mb-6">
+                            <div className="text-4xl font-light text-white mb-1">{unsyncedCount}</div>
+                            <div className="text-xs text-textMuted uppercase tracking-wider">Entries Pending</div>
+                        </div>
+
+                        <Button 
+                            onClick={handleSync} 
+                            disabled={unsyncedCount === 0 || status === 'syncing'}
+                            className="w-full"
+                        >
+                            {status === 'syncing' ? 'Syncing...' : 'Sync Now'}
+                        </Button>
+
+                        {status === 'success' && (
+                            <p className="text-green-500 text-xs mt-4 animate-bounce">Sync Complete!</p>
+                        )}
+                         {status === 'error' && (
+                            <p className="text-red-500 text-xs mt-4">Sync Failed. Check console.</p>
+                        )}
+                    </div>
+                    
+                    <p className="mt-8 text-xs text-textMuted max-w-xs text-center leading-relaxed">
+                        Data is sent to your personal Google Sheet via secure proxy.
+                    </p>
+                </div>
+            );
+        };
+
+        /* ================= BLOCK: APP ROOT ================= */
+        const App = () => {
+            const [view, setView] = React.useState('journal');
+            const [entries, setEntries] = React.useState([]);
+
+            // Load initial state
+            React.useEffect(() => {
+                const loaded = getStorage(CONFIG.STORAGE_KEY, []);
+                // Sort by date desc
+                setEntries(loaded.sort((a, b) => new Date(b.date) - new Date(a.date)));
+            }, []);
+
+            // Save entries helper
+            const saveEntry = (newEntry) => {
+                const updated = [newEntry, ...entries];
+                setEntries(updated);
+                setStorage(CONFIG.STORAGE_KEY, updated);
+            };
+
+            // Sync complete helper
+            const handleSyncComplete = (ids) => {
+                const updated = entries.map(e => ids.includes(e.id) ? { ...e, synced: true } : e);
+                setEntries(updated);
+                setStorage(CONFIG.STORAGE_KEY, updated);
+            };
+
+            const NavButton = ({ id, icon: Icon, label }) => (
+                <button 
+                    onClick={() => setView(id)}
+                    className={`flex flex-col items-center justify-center w-full py-3 gap-1 transition-colors relative
+                        ${view === id ? 'text-accent' : 'text-textMuted hover:text-textMain'}
+                    `}
+                >
+                    <Icon />
+                    <span className="text-[10px] font-medium tracking-wide">{label}</span>
+                    {view === id && <div className="absolute top-0 w-8 h-0.5 bg-accent rounded-b-full shadow-[0_0_10px_#8b5cf6]"></div>}
+                </button>
+            );
+
+            return (
+                <div className="w-full h-full relative">
+                    {/* Header */}
+                    <header className="flex items-center justify-center py-6 mb-2">
+                        <div className="flex items-center gap-2">
+                            <span className="text-accent"><Icons.Moon /></span>
+                            <h1 className="text-xl font-bold tracking-[0.2em] text-white">LUCIDITY</h1>
+                        </div>
+                    </header>
+
+                    {/* Content Area */}
+                    <main className="w-full min-h-[70vh]">
+                        {view === 'journal' && <Journal entries={entries} onSave={saveEntry} />}
+                        {view === 'tracker' && <Tracker />}
+                        {view === 'help' && <Help />}
+                        {view === 'settings' && <Settings />}
+                        {view === 'sync' && <Sync entries={entries} onSyncComplete={handleSyncComplete} />}
+                    </main>
+
+                    {/* Bottom Navigation */}
+                    <nav className="fixed bottom-0 left-0 right-0 bg-surface/90 backdrop-blur-lg border-t border-border z-50 pb-safe">
+                        <div className="max-w-md mx-auto flex justify-between px-2">
+                            <NavButton id="journal" icon={Icons.Book} label="Journal" />
+                            <NavButton id="tracker" icon={Icons.Calendar} label="Tracker" />
+                            <NavButton id="sync" icon={Icons.Sync} label="Sync" />
+                            <NavButton id="help" icon={Icons.Help} label="Help" />
+                            <NavButton id="settings" icon={Icons.Settings} label="Settings" />
+                        </div>
+                    </nav>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
