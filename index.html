@@ -84,7 +84,8 @@
         };
 
         const TECHNIQUES = ['MILD', 'WILD', 'WBTB', 'SSILD', 'RC', 'DEILD', 'None'];
-        const VERSION = "v1.3.0";
+        const VERSION = "v1.4.0";
+        const DEFAULT_RC = "Am I dreaming?\nCount your fingers.\nCheck the time twice.\nNotice how your body feels right now.\nHow did you arrive here 10 seconds ago?\nPause. Is this moment fully clear?\nCheck the texture of reality.";
 
         /* ================= BLOCK: UTILS ================= */
         const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -100,6 +101,10 @@
                 const stored = localStorage.getItem(key);
                 return stored ? JSON.parse(stored) : defaultVal;
             } catch (e) {
+                // Fallback for legacy raw string storage in lucidity_rc
+                if (key === 'lucidity_rc' && localStorage.getItem(key)) {
+                     return localStorage.getItem(key);
+                }
                 console.error("Storage error", e);
                 return defaultVal;
             }
@@ -224,6 +229,54 @@
                 />
             </div>
         );
+
+        /* ================= BLOCK: MICRO PROMPT ================= */
+        const MicroPrompt = () => {
+            const [prompt, setPrompt] = React.useState('');
+            const [animate, setAnimate] = React.useState(false);
+
+            const getPrompts = () => {
+                const stored = getStorage('lucidity_rc', DEFAULT_RC);
+                // Handle split whether it's stored as JSON array or string (robustness)
+                const text = typeof stored === 'string' ? stored : JSON.stringify(stored);
+                // Our default and settings are stored as newline joined strings
+                return text.split('\n').filter(line => line.trim().length > 0 && !line.includes('"')); 
+            };
+
+            const pickRandom = () => {
+                const list = getPrompts();
+                if (list.length === 0) return;
+                const random = list[Math.floor(Math.random() * list.length)];
+                setAnimate(true);
+                // Small delay to allow fade out
+                setTimeout(() => {
+                    setPrompt(random);
+                    setAnimate(false);
+                }, 300);
+            };
+
+            React.useEffect(() => {
+                pickRandom();
+            }, []);
+
+            if (!prompt) return null;
+
+            return (
+                <div className="w-full max-w-sm px-4 mb-6 fade-in">
+                    <div 
+                        onClick={pickRandom}
+                        className="group relative overflow-hidden bg-surfaceHighlight/30 border border-border/50 rounded-xl p-4 text-center cursor-pointer transition-all hover:bg-surfaceHighlight/50 hover:border-accent/30"
+                    >
+                        <p className={`text-sm font-light text-textMain/90 italic transition-opacity duration-300 ${animate ? 'opacity-0' : 'opacity-100'}`}>
+                            "{prompt}"
+                        </p>
+                        <div className="absolute inset-x-0 bottom-1 flex justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            <span className="text-[10px] text-accent uppercase tracking-widest font-medium">New Prompt</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
 
         /* ================= BLOCK: JOURNAL ================= */
         const Journal = ({ entries, onSave, onDelete }) => {
@@ -590,12 +643,12 @@
 
         /* ================= BLOCK: SETTINGS ================= */
         const Settings = ({ onClearJournal }) => {
-            const [rcPrompts, setRcPrompts] = React.useState(getStorage('lucidity_rc', 'Am I dreaming?\nCount your fingers.\nCheck the time twice.'));
+            const [rcPrompts, setRcPrompts] = React.useState(getStorage('lucidity_rc', DEFAULT_RC));
             const [saved, setSaved] = React.useState(false);
             const [clearConfirm, setClearConfirm] = React.useState('');
 
             const handleSave = () => {
-                localStorage.setItem('lucidity_rc', rcPrompts);
+                setStorage('lucidity_rc', rcPrompts);
                 setSaved(true);
                 setTimeout(() => setSaved(false), 2000);
             };
@@ -616,7 +669,8 @@
                     </div>
 
                     <div className="bg-surfaceHighlight p-4 rounded-xl border border-border mb-6">
-                        <h3 className="text-sm font-medium text-white mb-3">Reality Check Prompts</h3>
+                        <h3 className="text-sm font-medium text-white mb-3">Reality Check & Micro Prompts</h3>
+                        <p className="text-xs text-textMuted mb-2">One prompt per line.</p>
                         <textarea 
                             value={rcPrompts}
                             onChange={(e) => setRcPrompts(e.target.value)}
@@ -787,6 +841,9 @@
                             <h1 className="text-xl font-bold tracking-[0.2em] text-white">LUCIDITY</h1>
                         </div>
                     </header>
+
+                    {/* Micro Prompt */}
+                    <MicroPrompt />
 
                     {/* Content Area */}
                     <main className="w-full min-h-[70vh]">
